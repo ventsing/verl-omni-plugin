@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwen35-whisper-plugin"
+version = "0.1.0"
+description = "Qwen3.5 + Whisper omni model adapter for verl-omni (zero-intrusion)"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+dependencies = [
+    "verl-omni>=0.2.0",
+    "transformers>=4.40.0",
+]
+
+# 注意：不需要 [project.entry-points]！
+# verl-omni 通过 external_lib 配置项 + importlib.import_module() 加载插件，
+# 不是通过 entry_points 机制。
+# 用户只需在 config.yaml 中设置：
+#   external_lib: qwen35_whisper_plugin
+
+[tool.setuptools.packages.find]
+include = ["qwen35_whisper_plugin*"]

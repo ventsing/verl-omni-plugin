@@ -1,0 +1,80 @@
+# ============================================================================
+# Qwen3.5-MoE Thinker GSPO 训练配置模板
+#
+# 从这个模板开始，改 model path / data path 即可。
+# 每个标注 [可调] 的项是换模型时最可能要改的。
+# ============================================================================
+
+# ---- 基础 ----
+experiment_name: qwen35_moe_thinker_gspo
+seed: 42
+
+# ---- 模型 [可调] ----
+actor_rollout_ref:
+  model:
+    path: /path/to/Qwen3.5-MoE                    # [可调] 模型路径
+    external_lib: verl_omni_ext                    # [固定] 你的 ext 包名
+    model_type: omni_model
+    model_stage: thinker
+    trust_remote_code: true
+    architecture: Qwen3_5MoeForConditionalGeneration  # [可调] 与 config.json 一致
+
+  actor:
+    strategy: fsdp
+    ppo_mini_batch_size: 32                        # [可调]
+    ppo_micro_batch_size: 4                        # [可调]
+    gamma: 1.0
+    lam: 1.0
+    clip_range: 0.2
+
+  rollout:
+    name: vllm
+    engine_backend: vllm_omni                      # [固定] omni 推理引擎
+    engine_kwargs:
+      vllm_omni:
+        pipeline_name: qwen3_5_moe                 # [可调] 与槽位②注册键一致
+        pipeline_mode: thinker_only
+    temperature: 1.0
+    top_p: 0.95
+    max_response_length: 4096                      # [可调]
+
+  ref:
+    strategy: fsdp
+
+# ---- 数据 [可调] ----
+data:
+  train_files: /path/to/training_data.parquet      # [可调]
+  val_files: /path/to/val_data.parquet              # [可调]
+  max_prompt_length: 8192                          # [可调]
+  batch_size: 128                                  # [可调]
+  # 如果需要自定义数据集（槽位④）：
+  # custom_cls:
+  #   path: pkg://verl_omni_ext.models.qwen3_5_moe.dataset
+  #   name: Qwen35MoeDataset
+
+# ---- 算法 ----
+algorithm:
+  trainer_type: policy_gradient
+  sample_source: online
+  adv_estimator: grpo                              # [可调] @register_adv_est 的名字
+  # policy_loss: audio_aware_ppo                  # [可调] @register_policy_loss 的名字
+
+# ---- 训练范式 ----
+trainer:
+  use_v1: true
+  v1:
+    trainer_name: omni_sync                        # [可调] @register_trainer 的名字
+    # 全双工：
+    # trainer_name: omni_fullduplex
+    # fullduplex:
+    #   num_warmup_batches: 2
+    #   parameter_sync_step: 4
+
+# ---- reward ----
+reward:
+  custom_reward_function:
+    path: pkg://verl_omni_ext.reward.functions     # [可调] 自定义 reward
+    name: compute_score
+  # 或者用 reward manager：
+  # reward_model:
+  #   reward_manager: audio_quality_reward         # [可调] @register 的名字

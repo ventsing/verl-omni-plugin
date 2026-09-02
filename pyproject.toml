@@ -3,75 +3,41 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "verl-omni-plugin"
+name = "verl-omni-ext"
 version = "0.1.0"
-description = "Plugin framework for verl, verl-omni, vllm, and vllm-omni with audio and full-duplex support"
+description = "Out-of-tree model adapters for verl-omni (three-layer: plugin / monkey-patch / gate-patch)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
-keywords = ["verl", "vllm", "reinforcement-learning", "multimodal", "audio"]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-dependencies = [
-    "torch>=2.0.0",
-    "numpy>=1.24.0",
-    "packaging>=23.0",
-]
+dependencies = ["verl-omni>=0.2.0"]
+
+# ============================================================================
+# 入口点自动发现 —— 消灭对上游 __init__.py 的编辑
+#
+# 每加一个模型/trainer/reward，只需在这里加一行声明，不需要改任何 __init__.py。
+# verl_omni_ext/__init__.py 的 _load_all() 会遍历所有入口点组逐个 import，
+# 触发 @register 装饰器注册到各注册表。
+#
+# 入口点组：
+#   verl_omni.models   — 模型适配器（@OmniModelBase.register）
+#   verl_omni.trainers — 训练范式（@register_trainer）
+#   verl_omni.reward   — reward 管理器（@register reward manager）
+#
+# algos（@register_adv_est / @register_policy_loss）和 workers 不需要 entry_points，
+# 它们在 __init__.py 里被 import 触发注册（因为这些注册表不在 verl_omni 命名空间下）。
+# ============================================================================
+[project.entry-points."verl_omni.models"]
+qwen3_5_moe  = "verl_omni_ext.models.qwen3_5_moe"
+minicpmo_5_0 = "verl_omni_ext.models.minicpmo_5_0"
+
+[project.entry-points."verl_omni.trainers"]
+fullduplex = "verl_omni_ext.trainer"
+
+[project.entry-points."verl_omni.reward"]
+audio_quality = "verl_omni_ext.reward"
 
 [project.optional-dependencies]
-verl = [
-    "verl>=0.6.0",
-]
-verl-omni = [
-    "verl-omni>=0.2.0",
-]
-vllm = [
-    "vllm>=0.6.0",
-]
-vllm-omni = [
-    "vllm-omni>=0.1.0",
-]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-]
-all = [
-    "verl-omni-plugin[verl,verl-omni,vllm,vllm-omni,dev]",
-]
-
-[project.entry-points."verl.platform_plugins"]
-custom = "plugins.verl.platform:CustomPlatform"
-
-[project.entry-points."vllm.general_plugins"]
-verl_omni_plugin = "plugins:register_vllm_plugin"
+dev = ["pytest>=7.0.0"]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["shared*", "plugins*"]
-
-[tool.black]
-line-length = 100
-target-version = ["py310"]
-
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-asyncio_mode = "auto"
+include = ["verl_omni_ext*"]

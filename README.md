@@ -1,225 +1,142 @@
-# verl-omni-plugin
+# verl-omni-ext
 
-一个用于扩展 verl、verl-omni、vllm 和 vllm-omni 的插件框架，支持音频处理、全双工训练和多模态推理。
+verl-omni 的 out-of-tree 模型适配包。**三层分治**架构：插件 / monkey-patch / gate-patch 按对象所有权分层组合。
 
-## 🎯 特性
+## 核心判断
 
-- **零侵入**: 不修改上游仓库代码，通过 plugin + monkey-patch 注入特性
-- **模块化设计**: 按仓库分离插件，每个插件独立管理
-- **共享工具**: 跨插件共享音频处理、Patch 管理等工具
-- **版本兼容**: 统一的版本检查和兼容性管理
-- **可回滚**: 支持动态启用/禁用 patches
+> 你的适配代码已经是插件了，只差最后 42 行没有插件化。
 
-## 📦 安装
+实际开发的两次适配（Qwen3.5-MoE、MiniCPM-o）中，**98% 是新增独立文件**，只碰到 2 个上游 `__init__.py`（共 42 行 import 拼接）。这 42 行是唯一需要消灭的冲突面——用**入口点自动发现**归零它。
 
-```bash
-# 基础安装
-pip install -e .
+## 三层分治
 
-# 安装特定仓库的支持
-pip install -e ".[verl]"
-pip install -e ".[verl-omni]"
-pip install -e ".[vllm]"
-pip install -e ".[vllm-omni]"
+| 层次 | 对象 | 手段 | 目标占比 |
+|------|------|------|---------|
+| **L1 插件** | 自己的模型适配代码 | out-of-tree 包 + 注册表（5 个扩展点） | ≥95% |
+| **L2 monkey patch** | 第三方库 / checkpoint remote code | 幂等 + 前置断言 + 版本指纹 + 返回 bool | ~4% |
+| **L3 gate patch** | verl-omni 自身、扩展点够不着 | 开关默认 off + 台账 + 上游 PR | ≤1%，每条有销账计划 |
 
-# 安装所有支持
-pip install -e ".[all]"
-```
+**不是三选一，是按对象所有权分层。** 三者像螺丝刀和扳手——作用对象不同，组合使用。
 
-## 🚀 快速开始
+## verl-omni 的 5 个扩展点
 
-### 1. 启用插件
+| 槽位 | 注册机制 | 用途 |
+|------|---------|------|
+| ① OmniModelBase | `@register(architecture, stage)` | 训练侧适配器（thinker/talker） |
+| ② OmniRolloutPipelineBase | `@register(model_type)` | 推理侧拓扑适配器 |
+| ③ VERL_USE_EXTERNAL_MODULES | 环境变量 → `importlib.import_module` | 注册触发器（接受逗号分隔多模块） |
+| ④ data.custom_cls | `pkg://path:ClassName` | 数据集注入 |
+| ⑤ examples 脚本 | 启动脚本 | 配置载体 + 前置自检 |
 
-```python
-# 在训练脚本中导入插件（自动注册所有扩展）
-import verl_omni_plugin
-
-# 或者只启用特定仓库的插件
-from plugins import verl, verl_omni
-```
-
-### 2. 使用音频模型
-
-```python
-from plugins.verl_omni.models.audio import AudioHead
-
-# 创建音频处理头
-audio_head = AudioHead(config)
-
-# 处理音频输入
-audio_features = audio_head(audio_tensor)
-```
-
-### 3. 使用全双工训练
-
-```python
-from plugins.verl.trainer import FullDuplexTrainer
-
-# 创建全双工训练器
-trainer = FullDuplexTrainer(config)
-
-# 运行全双工训练
-trainer.run_duplex_training()
-```
-
-### 4. 使用多模态 Reward
-
-```python
-from plugins.verl_omni.reward_loop import AudioRewardManager
-
-# 创建音频 Reward 管理器
-reward_manager = AudioRewardManager(config)
-
-# 计算多模态 Reward
-reward = reward_manager.compute_reward(outputs, targets)
-```
-
-## 📁 项目结构
-
-```
-verl-omni-plugin/
-├── shared/                          # 跨插件共享工具
-│   ├── patch_manager/               # 统一 Patch 管理器
-│   ├── audio/                       # 音频处理工具
-│   └── utils/                       # 通用工具
-│
-└── plugins/                         # 各仓库的插件
-    ├── verl/                        # verl 核心仓库插件
-    │   ├── platform/                # 平台扩展
-    │   ├── trainer/                 # 训练器扩展
-    │   ├── workers/                 # Worker 扩展
-    │   ├── distributed/             # 分布式通信
-    │   ├── data/                    # 数据处理
-    │   ├── reward/                  # Reward 框架
-    │   ├── patches/                 # Monkey-patch 管理
-    │   └── utils/                   # verl 专用工具
-    │
-    ├── verl_omni/                   # verl-omni 仓库插件
-    │   ├── models/                  # 多模态模型
-    │   ├── pipelines/               # 训练流水线
-    │   ├── reward_loop/             # Reward 循环
-    │   ├── trainer/                 # 训练器
-    │   ├── agent_loop/              # Agent Loop
-    │   ├── workers/                 # Worker
-    │   ├── patches/                 # Monkey-patch 管理
-    │   └── utils/                   # verl_omni 专用工具
-    │
-    ├── vllm/                        # vllm 核心仓库插件
-    │   ├── platform/                # 平台扩展
-    │   ├── model_executor/          # 模型执行器
-    │   ├── attention/               # Attention 扩展
-    │   ├── distributed/             # 分布式扩展
-    │   ├── patches/                 # Monkey-patch 管理
-    │   └── utils/                   # vllm 专用工具
-    │
-    └── vllm_omni/                   # vllm-omni 仓库插件
-        ├── pipelines/               # 推理流水线
-        ├── models/                  # 多模态模型
-        ├── patches/                 # Monkey-patch 管理
-        └── utils/                   # vllm_omni 专用工具
-```
-
-## 🔧 配置
-
-### 环境变量
+## 加载方式
 
 ```bash
-# 启用特定插件
-export VERL_USE_EXTERNAL_MODULES=verl_omni_plugin
-export VLLM_PLUGINS=verl_omni_plugin
-
-# 启用特定功能
-export VERL_OMNI_PLUGIN_ENABLE_AUDIO=1
-export VERL_OMNI_PLUGIN_ENABLE_FULL_DUPLEX=1
+# 启动脚本里设置
+export VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext
 ```
 
-### 配置文件
+verl-omni 在每个 Ray worker 进程里 `import_external_libs("verl_omni_ext")` → 执行 `verl_omni_ext/__init__.py` 的 `_load_all()` → 遍历 `entry_points("verl_omni.models")` 逐个 import → 触发 `@OmniModelBase.register()`。
 
-```yaml
-# config/plugin_config.yaml
-plugin:
-  enabled: true
-  
-  audio:
-    enabled: true
-    sample_rate: 16000
-    feature_dim: 80
-  
-  full_duplex:
-    enabled: true
-    weight_sync_interval: 10
-  
-  reward:
-    audio_weight: 0.3
-    visual_weight: 0.4
-    text_weight: 0.3
+## 零侵入边界
+
+| 层 | 零侵入? | 说明 |
+|----|---------|------|
+| verl-omni 训练侧 | ✅ | 三层分治完全覆盖 |
+| verl-omni rollout adapter | ✅ | 槽位②只是转发 vllm-omni 定义 |
+| **vllm-omni pipeline/模型** | **✅ gate patch** | **GP-004: 5 行补丁加 VLLM_OMNI_EXTERNAL_MODULES** |
+| vllm 平台适配 | ✅ | `vllm.platform_plugins` entry_points |
+| vllm 模型加载 | ✅ | `trust_remote_code` 动态加载 |
+| vllm weight_loader | ⚠ L2 | monkey patch 打 vllm 对象 |
+| 数据处理 | ✅ | 槽位①+④完全覆盖 |
+
+详见 [Rollout 侧适配分析](docs/rollout_adaptation.md) 和 [数据处理 Add-on](docs/data_pipeline.md)。
+
+## 目录结构
+
+```
+verl-omni-ext/                        # = 本仓
+├── pyproject.toml                     #   入口点声明（models/trainers/reward 三组）
+├── verl_omni_ext/
+│   ├── __init__.py                    #   _load_all() 多组自动发现
+│   ├── _patchkit.py                   #   L2 monkey patch 公共基建
+│   ├── models/                        #   模型适配（槽位①②+L2+槽位④）
+│   │   ├── qwen3_5_moe/               #     adapter + rollout + patches + dataset
+│   │   └── minicpmo_5_0/              #     同上 + 模块级补丁
+│   ├── trainer/                      #   训练范式（@register_trainer）
+│   │   └── fullduplex_trainer.py      #     全双工 trainer
+│   ├── reward/                       #   reward 扩展
+│   │   ├── managers.py                #     @register reward manager
+│   │   └── functions.py               #     custom_reward_function
+│   ├── algos/                        #   自定义算法
+│   │   ├── adv_est.py                 #     @register_adv_est
+│   │   └── policy_loss.py             #     @register_policy_loss
+│   ├── workers/                      #   自定义 worker
+│   │   └── async_rollout.py           #     全双工推理 worker
+│   └── gates/
+│       └── ledger.md                  #   L3 台账（≤5 条）
+├── examples/
+│   ├── qwen3_5_moe/
+│   │   ├── config/*.yaml              #     config 模板
+│   │   ├── run_*.sh                   #     启动脚本 + 前置自检
+│   │   └── probes/v0_*.sh             #     探针
+│   ├── minicpmo_5_0/                  #     标注 6 处 [MiniCPM] diff
+│   └── qwen35_whisper_plugin/         #     教学骨架
+├── tests/                             #   适配器边界 CPU 测试
+└── docs/
+    ├── three_layer_strategy.md        #   三层分治详解
+    ├── plugin_architecture_design.md  #   架构设计
+    ├── rollout_adaptation.md          #   vllm-omni/vllm 适配（零侵入边界）
+    ├── data_pipeline.md               #   数据处理 add-on
+    ├── feature_fullduplex.md          #   全双工特性添加
+    ├── vllm_omni_changes.md            #   跨仓适配记录
+    ├── migration_guide.md             #   迁移路线
+    └── gate_patch_ledger.md           #   L3 台账规范
 ```
 
-## 📝 开发指南
-
-### 添加新的 Patch
-
-```python
-# plugins/verl/patches/trainer_patches.py
-from shared.patch_manager import BasePatchManager
-
-class VerlTrainerPatches(BasePatchManager):
-    @classmethod
-    def register_all(cls):
-        cls.register_patch(
-            name="my_custom_trainer",
-            target_module="verl.trainer.ppo.v1.trainer_base",
-            target_attr="BaseTrainer",
-            replacement_fn="plugins.verl.trainer:MyCustomTrainer",
-            version_check=lambda: cls._check_version("verl", ">=0.6.0"),
-            description="自定义训练器"
-        )
-```
-
-### 添加新的音频模型
-
-```python
-# plugins/verl_omni/models/audio/my_audio_model.py
-from shared.audio import AudioProcessor
-from verl_omni.pipelines.model_base import OmniModelBase
-
-@OmniModelBase.register("MyAudioModel", stage="thinker")
-class MyAudioModelAdapter(OmniModelBase):
-    def __init__(self, config, **kwargs):
-        super().__init__(config, **kwargs)
-        self.processor = AudioProcessor(config)
-    
-    def process_audio(self, audio):
-        return self.processor.extract_features(audio)
-```
-
-## 🧪 测试
+## 加新模型只需 3 步
 
 ```bash
-# 运行所有测试
-pytest tests/
+# 1. 加一行入口点声明
+echo 'your_model = "verl_omni_ext.models.your_model"' >> pyproject.toml [entry-points]
 
-# 运行特定模块的测试
-pytest tests/test_audio/
-pytest tests/test_trainer/
+# 2. 新建一个目录
+mkdir verl_omni_ext/models/your_model/
+# 写 adapter.py（槽位①）+ rollout.py（槽位②）+ patches.py（L2，如有）
 
-# 运行带覆盖率的测试
-pytest --cov=plugins --cov=shared tests/
+# 3. 从最近的模型移植启动脚本
+cp examples/qwen3_5_moe/run_*.sh examples/your_model/
+# 改 6 处标注点
 ```
 
-## 📚 文档
+**不碰任何上游文件。**
 
-详细文档请参考各插件目录下的 README.md：
+## 扩展点覆盖
 
-- [verl 插件文档](plugins/verl/README.md)
-- [verl-omni 插件文档](plugins/verl_omni/README.md)
-- [vllm 插件文档](plugins/vllm/README.md)
-- [vllm-omni 插件文档](plugins/vllm_omni/README.md)
+| 扩展点 | 注册表 | ext 包位置 | entry_points? |
+|--------|--------|-----------|---------------|
+| 模型 adapter | `@OmniModelBase.register` | `models/` | ✅ `verl_omni.models` |
+| 推理 rollout | `@OmniRolloutPipelineBase.register` | `models/` | ✅ `verl_omni.models` |
+| 训练范式 | `@register_trainer` | `trainer/` | ✅ `verl_omni.trainers` |
+| reward 管理器 | `@register` (reward_loop) | `reward/managers.py` | ✅ `verl_omni.reward` |
+| 优势估计器 | `@register_adv_est` | `algos/adv_est.py` | import 触发 |
+| policy loss | `@register_policy_loss` | `algos/policy_loss.py` | import 触发 |
+| 自定义 reward 函数 | `custom_reward_function` config | `reward/functions.py` | 路径指向 |
+| 数据集 | `data.custom_cls` | `models/<m>/dataset.py` | 路径指向 |
+| 自定义 worker | `worker_cls` config | `workers/` | 路径指向 |
+| L2 monkey patch | `_patchkit.py` | `models/<m>/patches.py` | import 触发 |
+| L3 gate patch | 台账 | `gates/ledger.md` | — |
 
-## 🤝 贡献
+## 文档
 
-欢迎提交 Issue 和 Pull Request！
+- [三层分治策略](docs/three_layer_strategy.md) — 什么放哪一层，为什么
+- [架构设计](docs/plugin_architecture_design.md) — 5 扩展点 + 时序陷阱 + 入口点自动发现
+- [迁移路线](docs/migration_guide.md) — 6 步从现状到目标
+- [L3 gate patch 台账](docs/gate_patch_ledger.md) — 规范 + 当前 3 条隐性改动
+- [Rollout 侧适配](docs/rollout_adaptation.md) — vllm-omni / vllm 需要改什么（零侵入边界）
+- [数据处理 Add-on](docs/data_pipeline.md) — 6 个数据扩展点 + 静默失败陷阱
+- [全双工特性添加](docs/feature_fullduplex.md) — 新训练范式怎么 add-on
+- [跨仓适配记录](docs/vllm_omni_changes.md) — vllm-omni 侧每个模型的改动清单
 
-## 📄 许可证
+## License
 
 Apache-2.0

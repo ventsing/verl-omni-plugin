@@ -67,6 +67,41 @@ else:
 | (c) 有 CPU 测试验证补丁行为 | 上游修了原 bug 时测试红 |
 | (d) 返回 bool，启动脚本断言为 True | 目标不存在时启动 3 秒内退出 |
 
+### ②b 多进程/分布式的第二个风险：patch 没传播 + 签名漂移
+
+单进程下 (a)~(d) 够了。但 verl-omni 是 Ray 多 worker：**patch 打的是进程内全局对象**，每个 worker 都要执行 `import_external_libs` 才有补丁。两个新风险：
+
+| 风险 | 例子 | 现状 |
+|------|------|------|
+| **传播缺失** | 某类 Ray worker 没走 external_libs 路径（不同 worker 类型 / spawn 时机差异）→ 那边 `transformers.AutoImageProcessor` 没被替换 | 当前 `self_check()` 只查当前进程，**发现不了别的 worker 缺补丁** |
+| **签名漂移** | 上游升级把 `register` 签名改了，`hasattr` 还成立，补丁打上但语义已错 | `expected_signature` 只查属性存在，**不查参数签名** |
+
+**`_patchkit.py` 增强版注入的 4 道防线：**
+
+| 机制 | API | 作用 | 何时用 |
+|------|-----|------|--------|
+| 签名指纹 | `idempotent_patch(probe_signature=True)` | patch 应用前对目标做 `inspect.signature` 哈希；补丁可收到 `__patch_signature__` 按签名分支适配 | 写新补丁时默认开 |
+| 跨进程一致性证明 | `get_patch_state()` / `patch_state_line()` / `assert_patch_consensus(states)` | 每个 worker 上报本地 patch 状态（applied + 签名指纹），driver 断言所有 worker 集合一致、全 applied、指纹一致（版本倾斜会被抓） | Ray driver / 启动脚本收集 worker 日志 |
+| 运行时 watchdog | `verify_patches_alive()` | 复查已打补丁的 flag 是否还在（防被 reload/其他库覆盖） | 挂到 step loop 定期调 |
+| fail-fast | `VERL_OMNI_EXT_PATCH_STRICT=1` | 任何补丁未打上直接 raise，不静默继续 | 生产训练默认开 |
+
+**用法速览（driver 侧）：**
+
+```python
+# 1. 每个 worker 启动时打印（日志带固定前缀，driver grep 收集）
+from verl_omni_ext._patchkit import patch_state_line
+print(patch_state_line())   # "PATCH_STATE {...json...}"
+
+# 2. driver 汇总所有 worker 的状态后断言一致性
+from verl_omni_ext._patchkit import assert_patch_consensus
+ok, msg = assert_patch_consensus(worker_states)  # 缺补丁/未应用/版本倾斜 → ok=False
+assert ok, msg
+
+# 3. 训练循环里 watchdog
+from verl_omni_ext._patchkit import verify_patches_alive
+assert all(verify_patches_alive().values())  # 补丁活着才继续
+```
+
 ### ③ gate patch 的价值不在"运行时可切换"，在"合并时可验证"
 
 gate 的真正价值：上游合并冲突时，关掉 gate 跑上游测试（断言没破坏上游行为），再打开跑你的测试（断言行为还在）。把"合并对不对"的模糊判断变成两个可执行断言。

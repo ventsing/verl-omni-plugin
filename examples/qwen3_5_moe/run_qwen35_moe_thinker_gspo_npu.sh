@@ -16,6 +16,9 @@ export VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext
 # 让 vllm-omni 从 ext 包加载 pipeline 定义，不改 vllm-omni 源码树
 export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.qwen3_5_moe.vllm_omni
 
+# ---- L2 patch 严格模式：任何补丁未打上直接 raise，不静默继续 ----
+export VERL_OMNI_EXT_PATCH_STRICT=1
+
 # ---- 模型路径 ----
 MODEL_PATH="/path/to/Qwen3.5-MoE"
 DATA_PATH="/path/to/training_data.parquet"
@@ -42,13 +45,19 @@ assert 'qwen3_5_moe' in OmniRolloutPipelineBase._registry, 'Rollout adapter not 
 print('✓ Rollout adapter registered')
 "
 
-# 3. L2 补丁自检
+# 3. L2 补丁自检（含签名指纹上报 + watchdog）
+#    VERL_OMNI_EXT_PATCH_STRICT=1 时任何补丁未打上会直接 raise
 python -c "
-from verl_omni_ext._patchkit import self_check
+from verl_omni_ext._patchkit import self_check, patch_state_line, verify_patches_alive
 results = self_check()
 for name, ok in results.items():
     assert ok, f'Patch {name} not applied!'
-print('✓ All L2 patches applied')
+# 输出单行可解析的 patch 状态（Ray worker 日志 grep '^PATCH_STATE ' 收集，
+# driver 侧用 assert_patch_consensus() 校验所有 worker 一致）
+print(patch_state_line())
+# 运行时 watchdog：复查 flag 还在（被 reload/覆盖会响）
+assert all(verify_patches_alive().values()), 'Some patch lost at runtime!'
+print('✓ All L2 patches applied + alive')
 "
 
 # 4. 数据集 schema 校验

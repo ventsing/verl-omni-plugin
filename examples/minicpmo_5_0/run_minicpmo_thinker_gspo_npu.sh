@@ -12,6 +12,9 @@ export VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext
 # GP-004: vllm-omni 外部模块加载（前提: 已打 gates/apply_patches.sh）
 export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.minicpmo_5_0.vllm_omni
 
+# L2 patch 严格模式：任何补丁未打上直接 raise，不静默继续
+export VERL_OMNI_EXT_PATCH_STRICT=1
+
 # [MiniCPM] 改动 1: 模型路径
 MODEL_PATH="/path/to/MiniCPM-o-2.6"
 DATA_PATH="/path/to/training_data.parquet"
@@ -43,11 +46,13 @@ print('✓ Rollout adapter registered')
 "
 
 python -c "
-from verl_omni_ext._patchkit import self_check
+from verl_omni_ext._patchkit import self_check, patch_state_line, verify_patches_alive
 results = self_check()
 for name, ok in results.items():
     assert ok, f'Patch {name} not applied!'
-print('✓ All L2 patches applied')
+print(patch_state_line())
+assert all(verify_patches_alive().values()), 'Some patch lost at runtime!'
+print('✓ All L2 patches applied + alive')
 "
 
 # [MiniCPM] 改动 5: 数据集 schema 校验（custom_cls）

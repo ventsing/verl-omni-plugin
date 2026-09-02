@@ -13,7 +13,7 @@ verl-omni 的 out-of-tree 模型适配包。**三层分治**架构：插件 / mo
 | 层次 | 对象 | 手段 | 目标占比 |
 |------|------|------|---------|
 | **L1 插件** | 自己的模型适配代码 | out-of-tree 包 + 注册表（5 个扩展点） | ≥95% |
-| **L2 monkey patch** | 第三方库 / checkpoint remote code | 幂等 + 前置断言 + 版本指纹 + 返回 bool | ~4% |
+| **L2 monkey patch** | 第三方库 / checkpoint remote code | 幂等 + 前置断言 + 版本指纹 + 签名指纹 + 跨进程一致性证明 + watchdog + strict 模式 | ~4% |
 | **L3 gate patch** | verl-omni 自身、扩展点够不着 | 开关默认 off + 台账 + 上游 PR | ≤1%，每条有销账计划 |
 
 **不是三选一，是按对象所有权分层。** 三者像螺丝刀和扳手——作用对象不同，组合使用。

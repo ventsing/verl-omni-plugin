@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
     target_attr="AutoImageProcessor",
     fingerprint="transformers>=4.46",
     expected_signature="register",
+    probe_signature=True,  # 记录 register 签名指纹，跨进程一致性校验用
 )
-def apply_minicpmo_auto_register_guard(original_register):
+def apply_minicpmo_auto_register_guard(original_register, __patch_signature__=None):
     """守卫 6 个 AutoClass 的 register 方法
 
     原因：checkpoint 的 processing_minicpmo.py:478 用 str 当 config class 传，
@@ -37,7 +38,11 @@ def apply_minicpmo_auto_register_guard(original_register):
 
     为什么替换是安全的：这个 register 本来就是死代码——mapping 按 config class
     查，str key 永远命中不了。所以把它变成 no-op 不会改变任何运行时行为。
+
+    __patch_signature__: 原 register 的签名指纹（probe_signature=True 注入）。
+    如果 transformers 升级后 register 签名变了，这里能看到指纹变化。
     """
+    _ = __patch_signature__  # 保留注入：签名漂移时可在此分支适配
     def guarded_register(self, config_class, *args, **kwargs):
         if isinstance(config_class, str):
             # str key 永远命中不了 mapping，跳过即可
@@ -55,14 +60,18 @@ def apply_minicpmo_auto_register_guard(original_register):
     target_attr="AutoModelForMultimodalLM",
     fingerprint="transformers>=4.46",
     expected_signature="from_pretrained",
+    probe_signature=True,  # 记录 from_pretrained 签名指纹，跨进程一致性校验用
 )
-def apply_minicpmo_automodel_fallback(original_from_pretrained):
+def apply_minicpmo_automodel_fallback(original_from_pretrained, __patch_signature__=None):
     """fallback：checkpoint 的 auto_map 缺 AutoModelForMultimodalLM 键
 
     原因：checkpoint 的 auto_map 只声明了 AutoModel，
     verl 调 AutoModelForMultimodalLM.from_pretrained 时找不到键就炸。
     fallback 到 AutoModel.from_pretrained。
+
+    __patch_signature__: 原 from_pretrained 的签名指纹。
     """
+    _ = __patch_signature__
     def patched_from_pretrained(cls, *args, **kwargs):
         try:
             return original_from_pretrained(cls, *args, **kwargs)

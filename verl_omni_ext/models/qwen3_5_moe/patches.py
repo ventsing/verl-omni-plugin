@@ -15,6 +15,7 @@ from verl_omni_ext._patchkit import idempotent_patch
     target_attr="Qwen3_5MoeVisionModel",
     fingerprint="transformers>=4.46",
     expected_signature="forward",
+    probe_signature=True,  # 记录目标 forward 签名指纹，跨进程一致性校验用
 )
 def apply_qwen3_5_vision_device_fix(original_forward):
     """修正 ViT 位置编码的设备归属

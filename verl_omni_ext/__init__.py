@@ -77,7 +77,8 @@ def _load_all() -> None:
 # 触发 importlib.import_module("verl_omni_ext") 时就会自动发现所有插件。
 _load_all()
 
-# algos 和 workers 不走 entry_points（它们的注册表不在 verl_omni 命名空间下），
-# 直接 import 触发 @register_adv_est / @register_policy_loss 装饰器。
-from . import algos   # noqa: F401
-from . import workers  # noqa: F401
+# algos 通过 import 触发 @register_adv_est / @register_policy_loss。
+# features 下放跨域特性（如全双工 = trainer + worker 协同）。
+# 单注册表扩展仍通过 entry_points 自动发现。
+from . import algos    # noqa: F401
+from . import features  # noqa: F401

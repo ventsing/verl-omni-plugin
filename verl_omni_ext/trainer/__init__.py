@@ -1,6 +1,5 @@
-"""
-全双工 trainer 模块
+"""训练范式注册目录（骨架）
 
-通过 @register_trainer("omni_fullduplex") 注册到 verl 的 trainer 注册表。
+跨域特性（如全双工）放在 features/ 下。
+单注册表的 trainer 可以放在这里。
 """
-from .fullduplex_trainer import OmniPPOTrainerFullDuplex  # noqa: F401

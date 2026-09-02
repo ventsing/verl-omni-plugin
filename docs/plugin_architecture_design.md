@@ -229,10 +229,10 @@ def _load_all():
 | policy loss | `@register_policy_loss` | `algos/policy_loss.py` | import 触发 | `policy_loss` |
 | 自定义 reward 函数 | `load_extern_object` | `reward/functions.py` | 路径指向 | `custom_reward_function` |
 | 数据集 | `load_extern_object` | `models/<m>/dataset.py` | 路径指向 | `data.custom_cls` |
-| 自定义 worker | `worker_cls` config | `workers/` | 路径指向 | `worker_cls` |
+| 自定义 worker | `worker_cls` config | `features/` 或 `workers/` | 路径指向 | `worker_cls` |
 
 **入口点自动发现覆盖 3 组**：models、trainers、reward。
-**algos 和 workers 通过 import 触发**（它们的注册表不在 `verl_omni` 命名空间下）。
+**algos 和 features 通过 import 触发**（它们的注册表不在 `verl_omni` 命名空间下）。
 
 加新模型/trainer/reward 的操作：
 ```bash
@@ -241,3 +241,73 @@ def _load_all():
 # 3. 从最近模型移植 config + 启动脚本
 # 不碰任何上游 __init__.py
 ```
+
+---
+
+## 八、运行时序链路（5 阶段）
+
+从进程启动到训练主循环，ext 包在每个阶段的参与点：
+
+```
+[阶段 0: 进程启动与模块拉取]
+Ray Worker / Driver 进程启动
+   ├── 读取环境变量: export VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext
+   └── import_external_libs("verl_omni_ext")
+         └── verl_omni_ext/__init__.py 执行 _load_all()
+               ├── 遍历 entry_points("verl_omni.models" / "trainers" / "reward")
+               ├── import models/xxx/__init__.py → 激活 L2 Monkey Patch（前置修补 AutoClass）
+               └── 触发 @OmniModelBase.register / @register_trainer / @register 注入注册表
+
+    ⚠ 时序陷阱：from_pretrained 在 configure_model 之前（fsdp/omni_impl.py:185）
+    所以让 transformers 能 import 得动 remote code 的补丁放在 __init__.py（阶段 0），
+    不是放在 configure_model 里——那里来不及。
+
+[阶段 1: 配置初始化期 (Config Post-Init)]
+OmniModelConfig.__post_init__()
+   ├── 读取 Checkpoint config.json 的 architecture
+   ├── OmniModelBase.get_class_by_name(architecture, "thinker") 命中 ThinkerAdapter
+   ├── adapter.configure_tokenizer()    (槽位 1a)
+   └── adapter.configure_processor()    (槽位 1b — 绕过 verl 白名单)
+
+[阶段 2: 数据集就绪期 (Dataset Init)]
+DataLoader 读取 custom_cls 配置
+   └── load_extern_object("pkg://verl_omni_ext.models.xxx.dataset:ClassName")
+       └── 将 maybe_filter_out_long_prompts 异常显式化 (槽位 4)
+
+[阶段 3: 模型构建与装配期 (Engine Build Module)]
+OmniFSDPEngine._build_module()
+   ├── 1. AutoModelForMultimodalLM.from_pretrained()  (依赖阶段 0 的 L2 Patch)
+   ├── 2. adapter.configure_model(module)             (槽位 1c: forward 签名适配)
+   └── 3. FSDP 包装模型实例并分发权重
+
+[阶段 4: Rollout 推理拓扑生成 (Rollout Init)]
+vllm_omni_async_server.py
+   ├── 读取 actor_rollout_ref.rollout.engine_kwargs.vllm_omni.pipeline_name
+   ├── OmniRolloutPipelineBase.get_class_by_name(pipeline_name) 命中 RolloutAdapter
+   └── adapter.build_stage_configs() 生成多阶段流水线 YAML (槽位 2)
+       （如果已打 GP-004: pipeline 定义从 ext 包的 vllm_omni/ 子目录加载）
+
+[阶段 5: 训练主循环 (Step Loop)]
+   ├── Rollout: 根据 Stage YAML 并发调度推理生成 Trajectory
+   ├── Actor: 经过适配的 forward(data, **kwargs) 计算梯度与 Loss
+   ├── Reward: custom_reward_function 或 @register reward manager 计算奖励
+   └── (全双工: trainer 和 rollout 并发，权重定期同步)
+```
+
+### 生命周期规则
+
+| 期 | 职责 | 不该做的 |
+|----|------|---------|
+| 包 Import（阶段 0） | 防御性补丁（AutoClass 修复、remote code guard） | 实例级操作 |
+| configure_processor（阶段 1） | 自建 processor、绑定 RoPE/dedup | 模型实例操作 |
+| configure_model（阶段 3） | forward 签名对齐、M-RoPE 设备绑定、子模块修剪 | 全局/类级补丁 |
+
+### 探针前置
+
+在写适配器之前，用 `verl_omni_ext/probes/` 测量关键事实：
+```bash
+python -m verl_omni_ext.probes.forward_signature --model_path /path/to/model
+python -m verl_omni_ext.probes.processor_whitelist --model_path /path/to/model
+```
+
+适配决策是测量出来的，不是猜的。

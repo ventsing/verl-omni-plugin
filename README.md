@@ -59,21 +59,33 @@ verl-omni-ext/                        # = 本仓
 ├── verl_omni_ext/
 │   ├── __init__.py                    #   _load_all() 多组自动发现
 │   ├── _patchkit.py                   #   L2 monkey patch 公共基建
-│   ├── models/                        #   模型适配（槽位①②+L2+槽位④）
-│   │   ├── qwen3_5_moe/               #     adapter + rollout + patches + dataset
-│   │   └── minicpmo_5_0/              #     同上 + 模块级补丁
-│   ├── trainer/                      #   训练范式（@register_trainer）
-│   │   └── fullduplex_trainer.py      #     全双工 trainer
+│   ├── models/                        #   【新增模型区域】一模型一独立目录
+│   │   ├── qwen3_5_moe/
+│   │   │   ├── thinker_adapter.py     #     槽位①: @OmniModelBase.register
+│   │   │   ├── rollout_adapter.py     #     槽位②: @OmniRolloutPipelineBase.register
+│   │   │   ├── patches.py             #     L2: vision device fix
+│   │   │   ├── dataset.py             #     槽位④（按需）
+│   │   │   └── vllm_omni/             #     vllm-omni 侧 pipeline（GP-004）
+│   │   └── minicpmo_5_0/              #     同上 + 4 个 L2 补丁 + 模块级补丁
+│   ├── features/                      #   【跨域特性区域】按功能域组织
+│   │   └── fullduplex/                #     全双工 = trainer + worker 协同
+│   │       ├── trainer.py             #       @register_trainer("omni_fullduplex")
+│   │       └── async_worker.py        #       异步推理 worker
 │   ├── reward/                       #   reward 扩展
 │   │   ├── managers.py                #     @register reward manager
 │   │   └── functions.py               #     custom_reward_function
 │   ├── algos/                        #   自定义算法
 │   │   ├── adv_est.py                 #     @register_adv_est
 │   │   └── policy_loss.py             #     @register_policy_loss
-│   ├── workers/                      #   自定义 worker
-│   │   └── async_rollout.py           #     全双工推理 worker
+│   ├── trainer/                      #   骨架（单注册表 trainer 可放这）
+│   ├── workers/                      #   骨架（单注册表 worker 可放这）
+│   ├── probes/                      #   探针（可 import 调用的测量工具）
+│   │   ├── forward_signature.py       #     forward 签名探测
+│   │   └── processor_whitelist.py     #     processor 白名单探测
 │   └── gates/
-│       └── ledger.md                  #   L3 台账（≤5 条）
+│       ├── ledger.md                  #   L3 台账（≤5 条）
+│       ├── vllm_omni_external_modules.patch  # GP-004
+│       └── apply_patches.sh           #   自动 apply 脚本
 ├── examples/
 │   ├── qwen3_5_moe/
 │   │   ├── config/*.yaml              #     config 模板

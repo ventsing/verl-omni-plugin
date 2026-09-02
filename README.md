@@ -141,7 +141,8 @@ cp examples/qwen3_5_moe/run_*.sh examples/your_model/
 ## 文档
 
 - [三层分治策略](docs/three_layer_strategy.md) — 什么放哪一层，为什么
-- [架构设计](docs/plugin_architecture_design.md) — 5 扩展点 + 时序陷阱 + 入口点自动发现
+- [架构设计](docs/plugin_architecture_design.md) — 9 扩展点 + 5 阶段时序 + 零侵入边界
+- [注入新模型指南](docs/inject_new_model.md) — **新模型适配 3+1 步（权威版）**
 - [迁移路线](docs/migration_guide.md) — 6 步从现状到目标
 - [L3 gate patch 台账](docs/gate_patch_ledger.md) — 规范 + 当前 3 条隐性改动
 - [Rollout 侧适配](docs/rollout_adaptation.md) — vllm-omni / vllm 需要改什么（零侵入边界）

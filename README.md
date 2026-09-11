@@ -68,9 +68,13 @@ verl-omni-ext/                        # = 本仓
 │   │   │   └── vllm_omni/             #     vllm-omni 侧 pipeline（GP-004）
 │   │   └── minicpmo_5_0/              #     同上 + 4 个 L2 补丁 + 模块级补丁
 │   ├── features/                      #   【跨域特性区域】按功能域组织
-│   │   └── fullduplex/                #     全双工 = trainer + worker 协同
+│   │   └── fullduplex/                #     全双工（两种正交形态）
 │   │       ├── trainer.py             #       @register_trainer("omni_fullduplex")
-│   │       └── async_worker.py        #       异步推理 worker
+│   │       ├── async_worker.py        #       异步推理 worker
+│   │       ├── omniflow_dataset.py    #       Omni-Flow 序列化（论文 2604.27393）
+│   │       ├── duplex_rollout.py      #       回放式 episode + GRPO group
+│   │       ├── rewards.py             #       四类全双工 reward
+│   │       └── _vllm_omni_bridge.py   #       vllm-omni /v1/duplex 客户端桥
 │   ├── reward/                       #   reward 扩展
 │   │   ├── managers.py                #     @register reward manager
 │   │   └── functions.py               #     custom_reward_function
@@ -148,6 +152,7 @@ cp examples/qwen3_5_moe/run_*.sh examples/your_model/
 - [Rollout 侧适配](docs/rollout_adaptation.md) — vllm-omni / vllm 需要改什么（零侵入边界）
 - [数据处理 Add-on](docs/data_pipeline.md) — 6 个数据扩展点 + 静默失败陷阱
 - [全双工特性添加](docs/feature_fullduplex.md) — 新训练范式怎么 add-on
+- [Omni-Flow 全双工交互训练](docs/feature_fullduplex_omniflow.md) — 论文 MiniCPM-o 4.5（arXiv 2604.27393）的插件化实现
 - [跨仓适配记录](docs/vllm_omni_changes.md) — vllm-omni 侧每个模型的改动清单
 
 ## License

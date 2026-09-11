@@ -3,9 +3,13 @@
 
 通过 verl 的 @register_trainer 注册表注册——不修改 verl/verl-omni 任何源码。
 
-全双工 = 训练和推理真正并发（不是交替）：
-  传统 RL：训练 → 停 → 推理生成 rollout → 停 → 训练（串行）
-  全双工：  训练和推理同时进行，推理结果实时反馈到训练
+两种"全双工"（正交，可叠加）：
+  A. 训练系统级（本文件原始职责）：训练和推理真正并发
+     传统 RL：训练 → 停 → 推理生成 rollout → 停 → 训练（串行）
+     全双工：  训练和推理同时进行，推理结果实时反馈到训练
+  B. 交互范式级（Omni-Flow，见 docs/feature_fullduplex_omniflow.md）：
+     模型边听边说、可打断、可主动——数据/rollout/reward 在
+     omniflow_dataset.py / duplex_rollout.py / rewards.py
 
 verl 已有的异步基础：
   - @register_trainer("separate_async") — 训练和 rollout 分离，可部分重叠
@@ -13,6 +17,7 @@ verl 已有的异步基础：
   - FullyAsyncLLMServerClient — 异步推理服务客户端
   - agent_loop_tq — TransferQueue 异步数据流
   - checkpoint_manager.update_weights() — 权重同步
+  - @register_adv_est("grpo") — GRPO 优势估计（Omni-Flow RL 用，论文 §5.4）
 
 本 trainer 继承 OmniPPOTrainerSync，改为异步并发执行。
 """
@@ -40,13 +45,23 @@ class OmniPPOTrainerFullDuplex(OmniPPOTrainerSync):
     3. 权重定期同步（parameter_sync_step 控制频率）
     4. 推理结果实时反馈到训练队列
 
-    配置方式（config.yaml）：
+    Omni-Flow 全双工交互训练（论文 arXiv 2604.27393）的推荐配置：
+
         trainer:
           v1:
-            trainer_name: omni_fullduplex   # 通过 @register_trainer 注册的名字
+            trainer_name: omni_fullduplex
+            adv_estimator: grpo            # 论文 §5.4 用 GRPO
+        actor_rollout_ref:
+          rollout:
+            worker_cls: pkg://verl_omni_ext.features.fullduplex.duplex_rollout
             fullduplex:
-              num_warmup_batches: 2          # 预热：往推理队列放的 batch 数
-              parameter_sync_step: 4         # 每 4 个 mini-batch 同步一次权重
+              episode_max_chunks: 150      # episode 窗口（30s @0.2s chunk）
+              group_size: 4                # GRPO group：同 episode N 条采样
+              chunk_period_ms: 200         # 论文 ablation 最优 chunk
+        data:
+          custom_cls:
+            path: pkg://verl_omni_ext.features.fullduplex.omniflow_dataset
+            collate_fn: omniflow_collate_fn
 
     加载链路（零侵入）：
       1. main_omni.py 的 uses_v1_trainer() 返回 True（trainer_type=policy_gradient）
@@ -79,7 +94,18 @@ class OmniPPOTrainerFullDuplex(OmniPPOTrainerSync):
         )
 
     def on_step_end(self):
-        """每 parameter_sync_step 步同步一次权重到推理引擎"""
+        """每 parameter_sync_step 步同步一次权重到推理引擎
+
+        Omni-Flow 的权重同步契约（episode 边界对齐，见
+        docs/feature_fullduplex_omniflow.md §七）：
+          活跃 duplex session 的 KV 是旧权重算的——权重变了 KV 语义错位。
+          rollout 引擎在 episode 边界应用新权重：close_session 释放全部
+          KV lease → update_weights → 下个 episode 用新权重 open_session。
+          weight_version 随轨迹记录，训练侧校验 batch 内版本一致。
+
+          实现上：duplex_rollout 的 worker 在 episode 间检查权重版本戳，
+          本方法的 update_weights 是推新版本；两边在 episode 边界汇合。
+        """
         sync_step = self.config.trainer.v1.get("fullduplex", {}).get(
             "parameter_sync_step", 4
         )
@@ -101,22 +127,16 @@ class OmniPPOTrainerFullDuplex(OmniPPOTrainerSync):
 # 推理侧的依赖（vllm-omni experimental/fullduplex）
 # ============================================================================
 #
-# 训练侧零侵入了，但推理侧需要 vllm-omni 的 fullduplex 支持：
+# 训练侧零侵入了，推理侧由 vllm-omni 主干承担（PR #3907 已合并）：
 #
-# vllm-omni 已有实验性全双工代码：
-#   vllm_omni/experimental/fullduplex/
-#     ├── __init__.py          (DuplexAdapter, DuplexRuntime, DuplexSession)
-#     ├── core/runtime.py      (DuplexRuntime — 全双工推理运行时)
-#     ├── core/session.py      (DuplexSession — 会话管理)
-#     ├── core/adapter.py      (DuplexAdapter — 输入/输出适配)
-#     ├── personaplex/         (全双工会话管理实验)
-#     └── request_client.py    (异步请求客户端)
+# vllm_omni/experimental/fullduplex/
+#   ├── core/        模型无关契约（DuplexAdapter / session / turn runtime）
+#   ├── engine/      scheduler 数据面（session KV lease、barge-in epoch）
+#   ├── openai/      WS 传输 / Realtime 投影（/v1/duplex、/v1/realtime?duplex=1）
+#   ├── minicpmo45/  MiniCPM-o 4.5 帧协议、listen/speak policy、Stage0
+#   └── personaplex/ Moshi 级 lockstep 语音到语音
 #
-# 但这些是实验性的，且：
-#   1. 需要适配到你的具体模型（类似 rollout 侧的 pipeline.py 适配）
-#   2. vllm-omni 没有 plugin 机制——必须改源码树
-#   3. 属于 rollout 侧的侵入面（见 docs/rollout_adaptation.md）
-#
-# 如果你的全双工只做"训练和推理并发"（不做真正的流式推理），
-# 可能不需要 vllm-omni 的 fullduplex——verl 的 FullyAsyncLLMServerClient
-# 已经足够支持"训练和推理并发 + 权重同步"。
+# 本仓库的对接（零新增 gate patch）：
+#   _vllm_omni_bridge.py 把 request_client 适配成 DuplexSessionClient 协议；
+#   新增全双工模型的 seam 是 core.DuplexAdapter（上游已定义），
+#   模型定义经 GP-004（VLLM_OMNI_EXTERNAL_MODULES）注册，照旧。

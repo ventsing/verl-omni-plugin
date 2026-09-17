@@ -154,6 +154,7 @@ cp examples/qwen3_5_moe/run_*.sh examples/your_model/
 - [全双工特性添加](docs/feature_fullduplex.md) — 新训练范式怎么 add-on
 - [Omni-Flow 全双工交互训练](docs/feature_fullduplex_omniflow.md) — 论文 MiniCPM-o 4.5（arXiv 2604.27393）的插件化实现
 - [全双工 GSPO 缺口分析](docs/fullduplex_gspo_gap_analysis.md) — 6 缺口 × 三层分治归置；GSPO/recompute verl 已内置的验证
+- [vllm-omni 部署与权重变换](docs/vllm_omni_deployment_and_weight_transform.md) — 三阶段拓扑/进程模型/FSDP 参数重排七环变换链
 - [跨仓适配记录](docs/vllm_omni_changes.md) — vllm-omni 侧每个模型的改动清单
 
 ## License

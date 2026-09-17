@@ -153,6 +153,7 @@ cp examples/qwen3_5_moe/run_*.sh examples/your_model/
 - [数据处理 Add-on](docs/data_pipeline.md) — 6 个数据扩展点 + 静默失败陷阱
 - [全双工特性添加](docs/feature_fullduplex.md) — 新训练范式怎么 add-on
 - [Omni-Flow 全双工交互训练](docs/feature_fullduplex_omniflow.md) — 论文 MiniCPM-o 4.5（arXiv 2604.27393）的插件化实现
+- [全双工 GSPO 缺口分析](docs/fullduplex_gspo_gap_analysis.md) — 6 缺口 × 三层分治归置；GSPO/recompute verl 已内置的验证
 - [跨仓适配记录](docs/vllm_omni_changes.md) — vllm-omni 侧每个模型的改动清单
 
 ## License

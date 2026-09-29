@@ -15,7 +15,7 @@
 
 每个模型家族在 `vllm_omni/model_executor/models/<model>/pipeline.py` 声明
 不可变的 stage 拓扑，注册进 `OMNI_PIPELINES`（`config/pipeline_registry.py`，
-即 GP-004 所扩展的注册表）。MiniCPM-o 4.5 的定义
+树外 pipeline 经公开 API `register_pipeline()` 注册）。MiniCPM-o 4.5 的定义
 （`minicpmo_4_5/pipeline.py`）：
 
 ```
@@ -233,9 +233,10 @@ session，但**多 episode 并行**需要：多 replica（`num_replicas`，参�
 
 ### 5.3 插件侧的三个落点
 
-1. **GP-004 注册 pipeline**：`models/<m>/vllm_omni/pipeline.py` 产出的
+1. **原生插件注册 pipeline**：`models/<m>/vllm_omni/pipeline.py` 产出的
    `PipelineConfig` 要与训练侧 `architecture`/`pipeline_name` 咬合
    （三键咬合规则），stage 拓扑里 `model_stage` 值要与 HF 前缀分拣规则一致。
+   注册走 `vllm_omni.general_plugins` 入口点 → `register_pipeline()`（零 patch）。
 2. **thinker adapter 的 `get_strip_modules`**：新模型探针的第一件事——
    确认 HF 类的顶层属性名与 checkpoint 前缀，strip 错了整条同步链错。
 3. **episode 边界同步**：复用 ⑤⑥⑦ 链路，编排层（duplex_rollout.py）控制
@@ -263,7 +264,7 @@ AutoModelForMultimodalLM ←─ 同一 checkpoint ─→ load_weights 前缀分�
 ## 参考（源码行号）
 
 - 拓扑冻结：`vllm_omni/model_executor/models/minicpmo_4_5/pipeline.py`（MINICPMO_4_5_PIPELINE）
-- 注册表：`vllm_omni/config/pipeline_registry.py:182`（GP-004 扩展点）
+- 注册表：`vllm_omni/config/pipeline_registry.py:182`（树外注册 API `register_pipeline` :192）
 - 进程孵化：`vllm_omni/engine/stage_engine_core_proc_manager.py:48`
 - 部署配方：`vllm_omni/deploy/minicpmo_4_5.yaml` / `minicpmo_4_5_3gpu_stage1_replicas.yaml`
 - 单类双 stage：`minicpmo_4_5_omni.py:57,94-123`

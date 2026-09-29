@@ -1,50 +1,37 @@
 #!/bin/bash
 # ============================================================================
-# Gate patch 应用脚本
+# Gate patch 应用脚本 —— GP-004 已退役，本脚本现在是提示性 no-op
 #
-# 给 vllm-omni 打 gate patch，加 VLLM_OMNI_EXTERNAL_MODULES 扩展点。
-# 打完后，新模型的 pipeline 定义可以放在 verl_omni_ext 里，
-# 不需要每次加模型都改 vllm-omni 源码树。
+# GP-004（vllm_omni_external_modules.patch）已被 vllm-omni 的原生插件机制
+# 取代：入口点组 vllm_omni.general_plugins。
+# 详见 verl_omni_ext/gates/ledger.md 的"GP-004 退役记录"。
 #
-# 用法：
-#   bash verl_omni_ext/gates/apply_patches.sh /path/to/vllm-omni
+# 新用法（零 patch）：
+#   pip install -e /path/to/verl-omni-ext
+#   # pyproject.toml 里的 [project.entry-points."vllm_omni.general_plugins"]
+#   # 会让 vllm-omni 在所有进程自动发现并执行 register()。
 #
-# 验证（gate off = 原行为不变）：
-#   unset VLLM_OMNI_EXTERNAL_MODULES
-#   python -c "import vllm_omni"  # 应该和没打补丁一样
+# 如果你之前打过 GP-004 补丁，回滚：
+#   cd /path/to/vllm-omni && git checkout -- vllm_omni/model_executor/models/registry.py
 # ============================================================================
 set -euo pipefail
 
-VLLM_OMNI_DIR="${1:?Usage: $0 <vllm-omni-source-dir>}"
-PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
-PATCH_FILE="$PATCH_DIR/vllm_omni_external_modules.patch"
+VLLM_OMNI_DIR="${1:-}"
 
-echo "=== Applying gate patches to vllm-omni ==="
-echo "  vllm-omni source: $VLLM_OMNI_DIR"
-echo "  patch file: $PATCH_FILE"
+echo "=== GP-004 已退役（superseded by vllm_omni.general_plugins）==="
+echo ""
+echo "不再需要给 vllm-omni 打补丁。新机制："
+echo "  pip install -e /path/to/verl-omni-ext"
+echo "  # 入口点 [project.entry-points.\"vllm_omni.general_plugins\"]"
+echo "  # → verl_omni_ext.vllm_omni_plugins:register"
+echo "  # → load_omni_general_plugins() 在所有进程自动执行"
 echo ""
 
-# 检查是否已打过补丁
-if grep -q "VLLM_OMNI_EXTERNAL_MODULES" "$VLLM_OMNI_DIR/vllm_omni/model_executor/models/registry.py" 2>/dev/null; then
-    echo "⚠ Patch already applied, skipping."
-    echo "  To re-apply: cd $VLLM_OMNI_DIR && git checkout -- vllm_omni/model_executor/models/registry.py"
-    exit 0
+if [ -n "$VLLM_OMNI_DIR" ]; then
+    if grep -q "VLLM_OMNI_EXTERNAL_MODULES" "$VLLM_OMNI_DIR/vllm_omni/model_executor/models/registry.py" 2>/dev/null; then
+        echo "⚠ 检测到 $VLLM_OMNI_DIR 仍带着 GP-004 补丁，建议回滚："
+        echo "  cd $VLLM_OMNI_DIR && git checkout -- vllm_omni/model_executor/models/registry.py"
+    else
+        echo "✓ $VLLM_OMNI_DIR 干净（无 GP-004 补丁），无需任何操作。"
+    fi
 fi
-
-# 应用补丁
-cd "$VLLM_OMNI_DIR"
-git apply "$PATCH_FILE" 2>/dev/null || {
-    echo "⚠ git apply failed, trying patch command..."
-    patch -p1 < "$PATCH_FILE"
-}
-
-echo ""
-echo "✓ Patch applied successfully."
-echo ""
-echo "Usage:"
-echo "  export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.qwen3_5_moe.vllm_omni"
-echo "  # 然后 vllm-omni 启动时会自动加载 ext 包里的 pipeline 定义"
-echo ""
-echo "Verify (gate off = no behavior change):"
-echo "  unset VLLM_OMNI_EXTERNAL_MODULES"
-echo "  python -c 'import vllm_omni'  # should work as before"

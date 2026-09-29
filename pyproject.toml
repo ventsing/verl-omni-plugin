@@ -19,9 +19,13 @@ dependencies = ["verl-omni>=0.2.0"]
 # 触发 @register 装饰器注册到各注册表。
 #
 # 入口点组：
-#   verl_omni.models   — 模型适配器（@OmniModelBase.register）
-#   verl_omni.trainers — 训练范式（@register_trainer）
-#   verl_omni.reward   — reward 管理器（@register reward manager）
+#   verl_omni.models          — 模型适配器（@OmniModelBase.register）
+#   verl_omni.trainers        — 训练范式（@register_trainer）
+#   verl_omni.reward          — reward 管理器（@register reward manager）
+#   vllm_omni.general_plugins — vllm-omni 侧注册（pipeline 拓扑/模型类），
+#                               由 vllm-omni 的 load_omni_general_plugins()
+#                               在所有进程发现并**执行**，零 patch。
+#                               取代已退役的 GP-004 gate patch。
 #
 # algos / features 不走 entry_points（它们的注册表不在 verl_omni 命名空间下），
 # 在 __init__.py 里被 import 触发注册。
@@ -35,6 +39,9 @@ fullduplex = "verl_omni_ext.features.fullduplex"
 
 [project.entry-points."verl_omni.reward"]
 audio_quality = "verl_omni_ext.reward"
+
+[project.entry-points."vllm_omni.general_plugins"]
+verl_omni_ext = "verl_omni_ext.vllm_omni_plugins:register"
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]

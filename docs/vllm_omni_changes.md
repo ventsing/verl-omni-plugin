@@ -1,49 +1,48 @@
 # vllm-omni 侧跨仓适配记录
 
-> verl-omni 的零侵入只覆盖训练侧。rollout 侧需要改 vllm-omni 源码树。
+> verl-omni 的零侵入覆盖训练侧；rollout 侧经 vllm-omni 原生插件组
+> `vllm_omni.general_plugins` 注册（零 patch）。
 > 本文档记录每个模型的 vllm-omni 侧改动清单，确保不遗漏。
 
 详见 [rollout 适配分析](rollout_adaptation.md) 的完整分析。
 
 ---
 
-## 为什么 vllm-omni 无法零侵入
+## vllm-omni 侧注册：原生插件机制（零 patch）
 
-vllm-omni 的 `_OMNI_MODELS` 是硬编码字典（`registry.py:8`），没有 entry_points / external_lib 机制。
+**更新（源码复查，推翻早前判断）**：vllm-omni 的 `_OMNI_MODELS` 确实是
+硬编码字典（`model_executor/models/registry.py:8`），但 vllm-omni 有原生
+入口点插件组 **`vllm_omni.general_plugins`**（`vllm_omni/plugins/__init__.py`）。
+`load_omni_general_plugins()` 在 `OmniEngineArgs.__post_init__`
+（`engine/arg_utils.py:252`）发现入口点并**执行**，所有进程加载，
+时机早于注册表消费。
 
-**但是：GP-004 gate patch 已解决这个问题。**
+**GP-004 gate patch 已退役**——它不仅多余，其 `_OMNI_MODELS` 元组注册
+还有三个 bug（硬编码前缀拼不进树外路径 / 时机早于 `OmniModelRegistry`
+实例构造 / 静默覆盖上游同名 arch）。见 `gates/ledger.md` 退役记录。
 
-打补丁后（5 行代码），pipeline 定义放在 ext 包里，不需要改 vllm-omni 源码树：
+新机制（pip install 即生效）：
 
-```bash
-# 一次性打补丁
-bash verl_omni_ext/gates/apply_patches.sh /path/to/vllm-omni
-
-# 启动时设环境变量
-export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.qwen3_5_moe.vllm_omni
+```toml
+[project.entry-points."vllm_omni.general_plugins"]
+verl_omni_ext = "verl_omni_ext.vllm_omni_plugins:register"
 ```
 
-### GP-004 补丁内容
+### ext 包里的注册链
 
-在 `_OMNI_MODELS` 字典定义后、`_VLLM_OMNI_MODELS` 合并前，加 5 行：
-
-```python
-for _mod in (m.strip() for m in _os.environ.get("VLLM_OMNI_EXTERNAL_MODULES", "").split(",") if m.strip()):
-    _importlib.import_module(_mod)  # 外部模块往 _OMNI_MODELS 字典注册
 ```
-
-- gate off（环境变量未设）→ 不执行额外代码 → 与上游逐字相同
-- gate on → import 外部模块 → pipeline 定义从 ext 包加载
-
-### ext 包里的 pipeline 定义
+vllm_omni.general_plugins 入口点
+  → verl_omni_ext/vllm_omni_plugins.py: register()
+  → models/<model>/vllm_omni/__init__.py: register()
+      ├── register_pipeline(PipelineConfig)   → OMNI_PIPELINES
+      └── (可选) OmniModelRegistry.register_model(arch, "module:Class")
+```
 
 ```
 verl_omni_ext/models/qwen3_5_moe/vllm_omni/
-├── __init__.py          # 往 _OMNI_MODELS 字典注册 architecture → module 映射
+├── __init__.py          # register()：register_pipeline + 模型类注册骨架
 └── pipeline.py          # PipelineConfig 拓扑定义（frozen）
 ```
-
-详见 [`verl_omni_ext/gates/`](../verl_omni_ext/gates/) 目录。
 
 ---
 
@@ -53,24 +52,24 @@ verl_omni_ext/models/qwen3_5_moe/vllm_omni/
 
 | # | 改动 | 文件 | 行数 |
 |---|------|------|------|
-| 1 | pipeline 拓扑定义 | `vllm_omni/model_executor/models/qwen3_5_moe/pipeline.py` | ~40 |
-| 2 | 模型实现 | `vllm_omni/model_executor/models/qwen3_5_moe/modeling_*.py` | ~20 |
-| 3 | architecture → module 映射 | `_OMNI_MODELS` 字典（`registry.py`） | +2 |
-| 4 | deploy yaml | `vllm_omni/deploy/qwen3_5_moe.yaml` | ~10 |
+| 1 | pipeline 拓扑定义 | `verl_omni_ext/models/qwen3_5_moe/vllm_omni/pipeline.py` | ~40 |
+| 2 | 模型实现（落地后） | `verl_omni_ext/models/qwen3_5_moe/vllm_omni/modeling_*.py` | ~20 |
+| 3 | 注册 | `vllm_omni/__init__.py: register()`（原生插件组编排） | ~10 |
+| 4 | deploy yaml | `verl_omni_ext/.../qwen3_5_moe.yaml`（或 vllm-omni deploy 目录软链） | ~10 |
 
-**合计**：4 文件 72 行
+**合计**：ext 包内 4 文件 ~80 行（vllm-omni 源码树零改动）
 
 ### MiniCPM-o 5.0
 
 | # | 改动 | 文件 | 行数 |
 |---|------|------|------|
-| 1 | pipeline 拓扑定义 | `vllm_omni/model_executor/models/minicpmo_5_0/pipeline.py` | ~80 |
-| 2 | 模型实现 | `vllm_omni/model_executor/models/minicpmo_5_0/modeling_*.py` | ~120 |
-| 3 | architecture → module 映射 | `_OMNI_MODELS` 字典（`registry.py`） | +2 |
-| 4 | deploy yaml | `vllm_omni/deploy/minicpmo_5_0.yaml` | ~20 |
-| 5 | stage input processors | `vllm_omni/model_executor/stage_input_processors/minicpmo_5_0.py` | ~21 |
+| 1 | pipeline 拓扑定义 | `verl_omni_ext/models/minicpmo_5_0/vllm_omni/pipeline.py` | ~80 |
+| 2 | 模型实现（复用上游 MiniCPMO 类） | — | 0 |
+| 3 | 注册 | `vllm_omni/__init__.py: register()`（只注册拓扑，不碰模型类） | ~10 |
+| 4 | deploy yaml | `verl_omni_ext/.../minicpmo_5_0.yaml` | ~20 |
+| 5 | stage input processors | `verl_omni_ext/.../stage_input_processors.py`（PipelineConfig 虚线引用） | ~21 |
 
-**合计**：5 文件 243 行
+**合计**：ext 包内 4 文件 ~130 行（vllm-omni 源码树零改动）
 
 ### 全双工（如果需要流式推理）
 
@@ -95,27 +94,13 @@ verl_omni_ext/models/qwen3_5_moe/vllm_omni/
 
 ---
 
-## 建议：给 vllm-omni 提上游 PR
-
-```python
-# 建议给 vllm-omni 提的扩展点（上游 PR）
-# vllm_omni/__init__.py
-def _load_external_pipelines():
-    """从 VLLM_OMNI_EXTERNAL_MODULES 加载外部 pipeline 定义"""
-    for module in os.environ.get("VLLM_OMNI_EXTERNAL_MODULES", "").split(","):
-        if module:
-            importlib.import_module(module)
-```
-
-这样未来新模型的 pipeline 定义可以放在 `verl_omni_ext` 里，不需要改 vllm-omni 源码树。
-
----
-
 ## 换模型时的 vllm-omni 侧检查清单
 
 - [ ] pipeline.py 定义了正确的 stage 拓扑
-- [ ] `_OMNI_MODELS` 注册表加了 architecture → module 映射
+- [ ] `vllm_omni/__init__.py: register()` 调用 `register_pipeline`
+- [ ] （仅新架构）`_maybe_register_model_class` 的注册代码已解开
 - [ ] deploy yaml 配置正确
 - [ ] stage input processors 正确（如有多 stage）
 - [ ] 如果跑 NPU：vllm-ascend 已安装
 - [ ] 如果 MoE：weight_loader 补丁已打
+- [ ] 推理环境 `pip install -e` 了 verl-omni-ext（entry point 可见）

@@ -43,7 +43,7 @@ verl-omni 在每个 Ray worker 进程里 `import_external_libs("verl_omni_ext")`
 |----|---------|------|
 | verl-omni 训练侧 | ✅ | 三层分治完全覆盖 |
 | verl-omni rollout adapter | ✅ | 槽位②只是转发 vllm-omni 定义 |
-| **vllm-omni pipeline/模型** | **✅ gate patch** | **GP-004: 5 行补丁加 VLLM_OMNI_EXTERNAL_MODULES** |
+| **vllm-omni pipeline/模型** | ✅ | 原生插件组 `vllm_omni.general_plugins`（entry point，零 patch；GP-004 已退役） |
 | vllm 平台适配 | ✅ | `vllm.platform_plugins` entry_points |
 | vllm 模型加载 | ✅ | `trust_remote_code` 动态加载 |
 | vllm weight_loader | ⚠ L2 | monkey patch 打 vllm 对象 |
@@ -55,7 +55,7 @@ verl-omni 在每个 Ray worker 进程里 `import_external_libs("verl_omni_ext")`
 
 ```
 verl-omni-ext/                        # = 本仓
-├── pyproject.toml                     #   入口点声明（models/trainers/reward 三组）
+├── pyproject.toml                     #   入口点声明（models/trainers/reward/vllm_omni 四组）
 ├── verl_omni_ext/
 │   ├── __init__.py                    #   _load_all() 多组自动发现
 │   ├── _patchkit.py                   #   L2 monkey patch 公共基建
@@ -65,7 +65,7 @@ verl-omni-ext/                        # = 本仓
 │   │   │   ├── rollout_adapter.py     #     槽位②: @OmniRolloutPipelineBase.register
 │   │   │   ├── patches.py             #     L2: vision device fix
 │   │   │   ├── dataset.py             #     槽位④（按需）
-│   │   │   └── vllm_omni/             #     vllm-omni 侧 pipeline（GP-004）
+│   │   │   └── vllm_omni/             #     vllm-omni 侧 pipeline（原生插件注册）
 │   │   └── minicpmo_5_0/              #     同上 + 4 个 L2 补丁 + 模块级补丁
 │   ├── features/                      #   【跨域特性区域】按功能域组织
 │   │   └── fullduplex/                #     全双工（两种正交形态）
@@ -86,10 +86,11 @@ verl-omni-ext/                        # = 本仓
 │   ├── probes/                      #   探针（可 import 调用的测量工具）
 │   │   ├── forward_signature.py       #     forward 签名探测
 │   │   └── processor_whitelist.py     #     processor 白名单探测
-│   └── gates/
-│       ├── ledger.md                  #   L3 台账（≤5 条）
-│       ├── vllm_omni_external_modules.patch  # GP-004
-│       └── apply_patches.sh           #   自动 apply 脚本
+│   ├── gates/
+│   │   ├── ledger.md                  #   L3 台账（≤5 条；GP-004 退役记录在案）
+│   │   ├── vllm_omni_external_modules.patch  # GP-004（已退役，仅存档）
+│   │   └── apply_patches.sh           #   提示性 no-op（新机制无需补丁）
+│   └── vllm_omni_plugins.py           # vllm_omni.general_plugins 入口点目标
 ├── examples/
 │   ├── qwen3_5_moe/
 │   │   ├── config/*.yaml              #     config 模板

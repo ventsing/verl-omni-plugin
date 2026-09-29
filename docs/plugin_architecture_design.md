@@ -285,7 +285,8 @@ vllm_omni_async_server.py
    ├── 读取 actor_rollout_ref.rollout.engine_kwargs.vllm_omni.pipeline_name
    ├── OmniRolloutPipelineBase.get_class_by_name(pipeline_name) 命中 RolloutAdapter
    └── adapter.build_stage_configs() 生成多阶段流水线 YAML (槽位 2)
-       （如果已打 GP-004: pipeline 定义从 ext 包的 vllm_omni/ 子目录加载）
+       （pipeline 定义从 ext 包的 vllm_omni/ 子目录经原生插件组
+        vllm_omni.general_plugins 注册——零 patch，GP-004 已退役）
 
 [阶段 5: 训练主循环 (Step Loop)]
    ├── Rollout: 根据 Stage YAML 并发调度推理生成 Trajectory

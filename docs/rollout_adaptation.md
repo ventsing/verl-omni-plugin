@@ -77,27 +77,28 @@ QWEN3_OMNI_PIPELINE = PipelineConfig(
 )
 ```
 
-### 建议：给 vllm-omni 提上游 PR 要 plugin 扩展点
+### 结论：vllm-omni 有原生插件机制，零 patch（GP-004 已退役）
 
-**已实现 gate patch（GP-004）**：在 ext 包里有一个 5 行的 git patch，给 vllm-omni 加 `VLLM_OMNI_EXTERNAL_MODULES` 扩展点。
+**更新（源码复查）**：vllm-omni 有原生入口点插件组
+**`vllm_omni.general_plugins`**（`vllm_omni/plugins/__init__.py`，
+与 vllm 的 `vllm.general_plugins` 同构）。`load_omni_general_plugins()`
+在 `OmniEngineArgs.__post_init__`（`engine/arg_utils.py:252`）等处发现
+入口点并**执行**，所有进程都会加载，时机早于注册表消费——零 patch。
 
-```python
-# verl_omni_ext/gates/vllm_omni_external_modules.patch（5 行核心逻辑）
-for _mod in (m.strip() for m in _os.environ.get("VLLM_OMNI_EXTERNAL_MODULES", "").split(",") if m.strip()):
-    _importlib.import_module(_mod)
+```toml
+# pyproject.toml（已就位）
+[project.entry-points."vllm_omni.general_plugins"]
+verl_omni_ext = "verl_omni_ext.vllm_omni_plugins:register"
 ```
 
-打补丁后，pipeline 定义放在 ext 包里（`models/<model>/vllm_omni/pipeline.py`），不需要改 vllm-omni 源码树：
+pipeline 定义放 ext 包（`models/<model>/vllm_omni/pipeline.py`），
+`register()` 用公开 API `register_pipeline()` / `OmniModelRegistry.
+register_model(arch, "module:Class")` 注册——惰性字符串支持树外包路径。
 
-```bash
-# 1. 打补丁（一次性）
-bash verl_omni_ext/gates/apply_patches.sh /path/to/vllm-omni
-
-# 2. 启动时设环境变量
-export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.qwen3_5_moe.vllm_omni
-```
-
-gate 行为：环境变量未设 → 不执行额外代码 → 与上游逐字相同。这 5 行补丁本身就是一个很好的上游 PR。
+**GP-004（VLLM_OMNI_EXTERNAL_MODULES patch）已退役**：它往 `_OMNI_MODELS`
+塞元组的做法有三个 bug（硬编码前缀拼不进树外路径 / 时机早于
+`OmniModelRegistry` 实例构造 / 静默覆盖上游同名 arch）。
+详见 `gates/ledger.md` 退役记录与 `vllm_omni_plugins.py` 模块说明。
 
 ---
 
@@ -177,7 +178,7 @@ verl-omni 的 rollout adapter 几乎不含逻辑——只是把 vllm-omni 那边
 |----|---------|------|
 | verl-omni 训练侧 | ✅ | 三层分治完全覆盖 |
 | verl-omni rollout adapter | ✅ | 槽位②只是转发 |
-| **vllm-omni pipeline/模型** | **✅ gate patch** | **GP-004: 5 行补丁加 VLLM_OMNI_EXTERNAL_MODULES** |
+| **vllm-omni pipeline/模型** | ✅ | 原生插件组 `vllm_omni.general_plugins`（entry point，零 patch） |
 | vllm 平台适配 | ✅ | `vllm.platform_plugins` entry_points |
 | vllm 模型加载 | ✅ | `trust_remote_code` 动态加载 |
 | vllm weight_loader | ⚠ L2 | monkey patch 打 vllm 对象 |

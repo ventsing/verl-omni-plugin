@@ -1,7 +1,8 @@
 # 注入新模型到 verl-omni（零侵入 3+1 步）
 
 > 用当前三层分治架构写就。训练侧完全零侵入（3 步），
-> rollout 侧需要 gate patch GP-004（第 4 步，一次性）。
+> rollout 侧走 vllm-omni 原生插件组（第 4 步，零 patch——
+> GP-004 gate patch 已退役，见 gates/ledger.md 退役记录）。
 > 本指南是权威版本——旧文档声称"不需要 entry_points / monkey-patch"是错误的。
 
 ---
@@ -156,27 +157,39 @@ actor_rollout_ref:
 
 ---
 
-## 第 4 步（rollout 侧）：pipeline 定义 + gate patch GP-004
+## 第 4 步（rollout 侧）：pipeline 定义 + 原生插件注册（零 patch）
 
-训练侧零侵入了；rollout 侧 vllm-omni 的 `_OMNI_MODELS` 是硬编码字典，**没有** plugin 机制。
-解决：先给 vllm-omni 打一次性 gate patch（5 行），然后 pipeline 定义放 ext 包里：
+vllm-omni 有原生入口点插件组 **`vllm_omni.general_plugins`**
+（`vllm_omni/plugins/__init__.py`）。`load_omni_general_plugins()` 在
+`OmniEngineArgs.__post_init__` 等处发现该组的入口点并**执行**（所有进程：
+主进程/引擎核心/stage 子进程），时机早于 `ModelConfig.registry` 首次消费——
+注册的 pipeline 一定被引擎看到。**前提：本包 pip install 到推理环境。**
 
-```bash
-# 一次性（每台机器一次）：
-bash verl_omni_ext/gates/apply_patches.sh /path/to/vllm-omni
-
-# 启动脚本加：
-export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.my_new_model.vllm_omni
+```toml
+# pyproject.toml（已就位，新模型无需改——register() 自动编排）
+[project.entry-points."vllm_omni.general_plugins"]
+verl_omni_ext = "verl_omni_ext.vllm_omni_plugins:register"
 ```
 
 ```python
 # verl_omni_ext/models/<your_model>/vllm_omni/__init__.py
-from vllm_omni.model_executor.models.registry import _OMNI_MODELS
-_OMNI_MODELS["<ArchitectureName>"] = ("my_model", "my_model", "<ClassName>")
-from . import pipeline  # noqa: F401
+from .pipeline import YOUR_MODEL_PIPELINE
+
+def register():   # 由 vllm_omni_plugins.register() 编排调用
+    from vllm_omni.config.pipeline_registry import register_pipeline
+    register_pipeline(YOUR_MODEL_PIPELINE)
 ```
 
-gate 行为：环境变量未设 → 不执行任何额外代码 → vllm-omni 行为与上游逐字相同。
+两个公开 API（均支持树外包路径）：
+- `register_pipeline(PipelineConfig)` —— stage 拓扑进 `OMNI_PIPELINES`
+- `OmniModelRegistry.register_model(arch, "module:Class")` —— 仅当本包
+  自带 vllm 模型实现（新架构）时；同步注册上游 `ModelRegistry`
+  （vllm-omni 自己在 `engine/arg_utils.py:138` 就这么镜像）
+
+**历史教训（为什么不用 `_OMNI_MODELS` 元组）**：元组被硬编码前缀
+`vllm_omni.model_executor.models.{folder}.{relname}` 拼接，树外路径拼不
+进去（惰性导入必炸）；字典赋值还会静默覆盖上游同名 arch（如 MiniCPMO）。
+详见 `verl_omni_ext/vllm_omni_plugins.py` 的模块说明。
 
 ---
 
@@ -214,4 +227,4 @@ python -m verl_omni_ext.probes.processor_whitelist --model_path /path/to/model
 - [架构设计](plugin_architecture_design.md) — 9 扩展点 + 5 阶段时序 + 零侵入边界
 - [三层分治策略](three_layer_strategy.md) — 什么放哪一层，为什么
 - [数据处理 Add-on](data_pipeline.md) — 槽位④ + 静默失败陷阱
-- [Rollout 侧适配](rollout_adaptation.md) — vllm-omni / vllm 适配（GP-004）
+- [Rollout 侧适配](rollout_adaptation.md) — vllm-omni / vllm 适配（原生插件注册）

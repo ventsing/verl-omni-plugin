@@ -150,9 +150,9 @@ L2 monkey patch（~4%，仅在 remote code 不兼容时）
 └── minicpmo_45/patches.py                     # forward 签名/processor（复用 _patchkit
                                                #   probe_signature，多进程传播证明）
 
-L3 gate patch（0 条新增）
+L3 gate patch（0 条新增；GP-004 已退役，改走原生插件组）
 └── rollout 侧复用 vllm-omni 主干已有 minicpmo45 runtime（PR #3907 已合并）
-    GP-004 照旧：VLLM_OMNI_EXTERNAL_MODULES 注册 pipeline 定义
+    pipeline 定义经 vllm_omni.general_plugins 入口点注册（零 patch）
 ```
 
 **为什么 rollout 侧零新增 L3**：训练 rollout 复用 vllm-omni 的

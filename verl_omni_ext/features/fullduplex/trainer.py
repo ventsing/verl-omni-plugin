@@ -139,4 +139,4 @@ class OmniPPOTrainerFullDuplex(OmniPPOTrainerSync):
 # 本仓库的对接（零新增 gate patch）：
 #   _vllm_omni_bridge.py 把 request_client 适配成 DuplexSessionClient 协议；
 #   新增全双工模型的 seam 是 core.DuplexAdapter（上游已定义），
-#   模型定义经 GP-004（VLLM_OMNI_EXTERNAL_MODULES）注册，照旧。
+#   模型定义经 vllm_omni.general_plugins 入口点注册（零 patch，GP-004 已退役）。

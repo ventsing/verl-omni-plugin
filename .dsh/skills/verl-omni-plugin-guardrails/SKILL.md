@@ -17,9 +17,10 @@ commits below ARE the evolution; any claim that contradicts them is stale:
 
 | Commit | What it established |
 |--------|--------------------|
-| `63bb478` | Three-layer strategy (L1 plugin / L2 monkey-patch / L3 gate-patch), 9 extension points, 3 entry-point groups, GP-004 vllm-omni gate patch |
+| `63bb478` | Three-layer strategy (L1 plugin / L2 monkey-patch / L3 gate-patch), 9 extension points, 3 entry-point groups |
 | `d894133` | **Renamed** `adapter.py` → `thinker_adapter.py`, `rollout.py` → `rollout_adapter.py`; added `features/` for cross-domain features; internalized `probes/` into the package |
 | `2505a18` | Added `docs/inject_new_model.md` — the authoritative new-model guide (3+1 steps) |
+| (latest, see `git log`) | **GP-004 retired**: vllm-omni side now registers via native entry-point group `vllm_omni.general_plugins` → `verl_omni_ext/vllm_omni_plugins.py:register()` → per-model `vllm_omni/__init__.py:register()` using public APIs `register_pipeline()` / `OmniModelRegistry.register_model(arch, "module:Class")`. Zero patch. Do NOT describe GP-004/`VLLM_OMNI_EXTERNAL_MODULES`/`_OMNI_MODELS` tuple insertion as the current mechanism — it is retired AND was buggy (hardcoded path prefix breaks out-of-tree modules; import-time timing precedes registry construction; silent clobber of upstream archs). |
 
 ## Current facts (do not contradict these)
 
@@ -27,13 +28,13 @@ commits below ARE the evolution; any claim that contradicts them is stale:
 - Loading: `VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext` → `import_external_libs` → `verl_omni_ext/__init__.py _load_all()` → iterates **entry-point groups** `verl_omni.models`, `verl_omni.trainers`, `verl_omni.reward` → triggers `@register` decorators.
 - L1 plugin (≥95%): adapters, datasets, config — the default.
 - L2 monkey-patch (~4%): `_patchkit.py` + per-model `patches.py` — **it exists and is core**. The claimed "no monkey-patch needed" is WRONG.
-- L3 gate-patch (≤1%): `gates/ledger.md` + `gates/vllm_omni_external_modules.patch` (GP-004 adds `VLLM_OMNI_EXTERNAL_MODULES` to vllm-omni registry).
-- Entry points ARE used — they are what eliminated 42 lines of upstream `__init__.py` edits.
+- L3 gate-patch (≤1%): `gates/ledger.md` only — GP-004 **retired** (superseded by `vllm_omni.general_plugins`); `gates/apply_patches.sh` is a no-op advisory script; the patch file is archived history.
+- Entry points ARE used — four groups now: `verl_omni.models`, `verl_omni.trainers`, `verl_omni.reward`, `vllm_omni.general_plugins`.
 
 **File naming (current):**
 - `verl_omni_ext/models/<model>/thinker_adapter.py` and `rollout_adapter.py` — NOT `adapter.py` / `rollout.py`. The old names were renamed in `d894133`; creating them again is damage.
 - `verl_omni_ext/models/<model>/patches.py` (L2) and optional `dataset.py` (slot ④).
-- `verl_omni_ext/models/<model>/vllm_omni/` (GP-004 pipeline definitions, registered into `vllm_omni`'s `_OMNI_MODELS`).
+- `verl_omni_ext/models/<model>/vllm_omni/` (pipeline definitions + `register()` using `register_pipeline`; NOT `_OMNI_MODELS` tuple insertion — that mechanism is retired and buggy).
 - `verl_omni_ext/features/<feature>/` for cross-domain features (e.g. `fullduplex/` with `trainer.py` + `async_worker.py`).
 - Adapters implement **4 methods**: `get_strip_modules`, `configure_processor`, `configure_tokenizer`, `configure_model` — not 3. `configure_model` is the instance-level patch entry (ran AFTER `from_pretrained`; module-level patches must go in package `__init__.py` instead).
 
@@ -69,7 +70,8 @@ When delegating doc/skeleton work to a subagent, REQUIRE it to:
 cd verl-omni-plugin
 git status --short                # must show ONLY intended changes
 find verl_omni_ext/models -name "adapter.py" -o -name "rollout.py"  # must be empty
-grep -c "GP-004" verl_omni_ext/gates/ledger.md    # must be ≥ 1
+grep -c "已退役" verl_omni_ext/gates/ledger.md   # must be ≥ 1 (GP-004 retired)
+grep -rn "VLLM_OMNI_EXTERNAL_MODULES" verl_omni_ext/models/  # must be empty (old mechanism gone)
 ```
 
 If the working tree shows unexpected modifications, `git checkout -- <file>` to restore, delete stray untracked duplicates, then re-run verification.

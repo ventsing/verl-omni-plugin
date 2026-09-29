@@ -7,7 +7,6 @@ verl-omni 侧的 rollout.py（槽位②）只是转发这里的定义。
 Stage 0: Thinker — 多模态理解 + 文本生成
 （如果需要 talker/code2wav stage，在这里追加）
 """
-from vllm_omni.config.endpoint_policy import EndpointRestriction, OmniServingCapability
 from vllm_omni.config.stage_config import (
     PipelineConfig,
     StageExecutionType,

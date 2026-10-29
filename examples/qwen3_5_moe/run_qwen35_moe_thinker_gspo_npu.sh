@@ -11,10 +11,10 @@ set -euo pipefail
 # verl_omni_ext 和 verl_omni 本体并存，逗号分隔
 export VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext
 
-# ---- GP-004: vllm-omni 外部模块加载 ----
-# 前提: 已执行 bash verl_omni_ext/gates/apply_patches.sh /path/to/vllm-omni
-# 让 vllm-omni 从 ext 包加载 pipeline 定义，不改 vllm-omni 源码树
-export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.qwen3_5_moe.vllm_omni
+# ---- 推理侧注册：vllm-omni 原生插件组（零 patch，GP-004 已退役）----
+# 前提: pip install -e /path/to/verl-omni-ext（推理环境也要装）
+# vllm-omni 启动时 load_omni_general_plugins() 自动发现并执行
+# verl_omni_ext.vllm_omni_plugins:register——无需环境变量，无需补丁
 
 # ---- L2 patch 严格模式：任何补丁未打上直接 raise，不静默继续 ----
 export VERL_OMNI_EXT_PATCH_STRICT=1

@@ -9,8 +9,10 @@ set -euo pipefail
 
 export VERL_USE_EXTERNAL_MODULES=verl_omni,verl_omni_ext
 
-# GP-004: vllm-omni 外部模块加载（前提: 已打 gates/apply_patches.sh）
-export VLLM_OMNI_EXTERNAL_MODULES=verl_omni_ext.models.minicpmo_5_0.vllm_omni
+# 推理侧注册：vllm-omni 原生插件组（零 patch，GP-004 已退役）
+# 前提: pip install -e /path/to/verl-omni-ext（推理环境也要装）
+# vllm-omni 启动时 load_omni_general_plugins() 自动发现并执行——
+# 无需环境变量，无需补丁
 
 # L2 patch 严格模式：任何补丁未打上直接 raise，不静默继续
 export VERL_OMNI_EXT_PATCH_STRICT=1

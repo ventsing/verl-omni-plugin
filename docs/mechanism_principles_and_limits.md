@@ -87,6 +87,49 @@ verl-omni 自己的问题不允许 L2——那是 L3 或上游 PR 的领地（�
 L3 存在的唯一理由：**上游没有扩展点、且 L2 够不着**（例如需要改
 模块 import 期之前的行为，或需要上游模块协作的改动）。
 
+### 1.4 为什么是 entry-point（L1 的插件发现问题）
+
+L1 的底层矛盾：**注册是 import 副作用**（`@register` 往每个进程的内存
+dict 塞条目），而查表发生在之后的任意时刻——所以必须有人在**每个需要
+查表的进程**里、**在查表之前** import 插件模块。问题变成：*"谁来发现
+要 import 什么？"* 四个候选通道的对比：
+
+| 通道 | 机制 | 问题 |
+|------|------|------|
+| ① 改上游 `__init__.py` | 手动加 `from .x import ...` | 违反零侵入（本仓的起源问题：42 行冲突面） |
+| ② env var + import_module | `VERL_USE_EXTERNAL_MODULES` 式 | 每个启动脚本都要设；vllm-omni 侧无此通道，只能 GP-004 式 L3 |
+| ③ config 路径 | `data.custom_cls: pkg://...` 式 | 逐项配置，用户要枚举每个模块——模型多了不可维护 |
+| ④ **entry-point** | `importlib.metadata` 读已安装包元数据 | **pip install 是硬前提**（见下） |
+
+选 ④ 的六个理由：
+
+1. **消灭上游源码编辑**（原始动机）：加模型 = 加目录 + pyproject 一行。
+2. **安装即生效、卸载即消失**：`pip install` 一次覆盖全部四个组
+   （models/trainers/reward/vllm_omni），无需任何启动脚本配合。
+3. **vllm-omni 侧的唯一零 patch 通道**：`load_omni_general_plugins()`
+   （`vllm_omni/plugins/__init__.py:61`）**只认** entry points——它没有
+   训练侧那样的 `external_lib` config 通道。不用 entry point 就只能
+   回到已退役的 GP-004（L3）。
+4. **降级隔离**：`_load_all()` 对每个 `ep.load()` 单独 try/except——
+   一个模型加载失败只 warning，不拖垮整包。硬编码 import 链是
+   一个失败全崩。
+5. **可组合**：入口点组是命名空间，**任何包**都能往 `verl_omni.models`
+   注册——第三方不必 fork verl_omni_ext 就能加模型。
+6. **声明式清单**：pyproject.toml 是唯一事实来源；`_load_all` 的日志
+   （`Loaded qwen3_5_moe -> ...`）即装即审。
+
+**机制细节**（解释为什么必须 pip install）：`entry_points()` 读的是
+已安装 distribution 的**元数据**（dist-info/EGG-INFO），不走 `sys.path`
+的 import 机制——`ep.load()` 才真正 import。PYTHONPATH 挂上的包元数据
+不可见，所以 entry point 通道的前提就是安装（这正是 L1-3 限制的由来）。
+
+**代价**（诚实清单）：
+- 训练/推理**两个环境**都要装本包（推理侧 vllm-omni 引擎进程独立环境时）
+- editable 安装下新增入口点条目要重新 `pip install -e .`（元数据不热刷新）
+- 静默降级：加载失败只 warning——部署后要看一眼日志确认全部 Loaded
+- 组内重名：两个 distribution 声明同名入口点会都加载，注册表后写者胜
+  （`register_pipeline` 对 clobber 有告警）
+
 ---
 
 ## 二、限制
